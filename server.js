@@ -474,7 +474,7 @@ return res.json(cache);
 } catch (error) {
 console.error("[/worldcup/live] Error:", error.message);
 
-```
+
 const apiErrorData = error.response?.data || null;
 const apiStatus = error.response?.status || null;
 
@@ -493,6 +493,6 @@ return res.status(200).json({
 });
 
 app.listen(PORT, () => {
-console.log("Backend Mundial 2026 corriendo en puerto " + PORT);
-console.log("Proveedor seleccionado: " + PROVIDER);
+  console.log("Backend Mundial 2026 corriendo en puerto " + PORT);
+  console.log("Proveedor seleccionado: " + PROVIDER);
 });
