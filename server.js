@@ -1,3 +1,4 @@
+```js
 /**
  * Mundial 2026 Backend para Roblox
  * =================================
@@ -6,16 +7,13 @@
  * Roblox -> este backend -> API deportiva real -> este backend limpia datos -> Roblox
  *
  * Endpoints:
+ *   GET /
  *   GET /health
  *   GET /worldcup/live
  *
  * Proveedores soportados:
- *   - Sportradar: recomendado si tienes acceso/API key
- *   - SportMonks: alternativa
- *
- * IMPORTANTE:
- * - No subas tu .env a GitHub.
- * - En Render, pon tus API keys en Environment Variables.
+ *   - Sportradar
+ *   - SportMonks
  */
 
 const express = require("express");
@@ -29,7 +27,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-const PROVIDER = (process.env.PROVIDER || "sportradar").toLowerCase();
+const PROVIDER = (process.env.PROVIDER || "sportmonks").toLowerCase();
 
 const SPORTRADAR_API_KEY = process.env.SPORTRADAR_API_KEY || "";
 const SPORTRADAR_BASE_URL =
@@ -60,15 +58,15 @@ function toUnix(value) {
   if (!value) return 0;
 
   if (typeof value === "number") {
-    // Si ya viene en segundos
     if (value > 1000000000 && value < 9999999999) return value;
-
-    // Si viene en milisegundos
     if (value > 9999999999) return Math.floor(value / 1000);
   }
 
   const parsed = new Date(value).getTime();
-  if (Number.isNaN(parsed)) return 0;
+
+  if (Number.isNaN(parsed)) {
+    return 0;
+  }
 
   return Math.floor(parsed / 1000);
 }
@@ -78,6 +76,7 @@ function normalizeStatus(rawStatus, kickoffUnix, minute, events = []) {
 
   const hasFullTimeEvent = events.some((e) => {
     const type = String(e.type || "").toLowerCase();
+
     return (
       type.includes("full_time") ||
       type.includes("match_ended") ||
@@ -87,7 +86,10 @@ function normalizeStatus(rawStatus, kickoffUnix, minute, events = []) {
   });
 
   if (hasFullTimeEvent) {
-    return { status: "Finished", statusConfidence: "high" };
+    return {
+      status: "Finished",
+      statusConfidence: "high"
+    };
   }
 
   const finishedStates = [
@@ -125,6 +127,7 @@ function normalizeStatus(rawStatus, kickoffUnix, minute, events = []) {
   const halfTimeStates = [
     "half_time",
     "halftime",
+    "half-time",
     "ht",
     "break"
   ];
@@ -138,36 +141,60 @@ function normalizeStatus(rawStatus, kickoffUnix, minute, events = []) {
   ];
 
   if (finishedStates.includes(raw)) {
-    return { status: "Finished", statusConfidence: "high" };
+    return {
+      status: "Finished",
+      statusConfidence: "high"
+    };
   }
 
   if (halfTimeStates.includes(raw)) {
-    return { status: "HalfTime", statusConfidence: "high" };
+    return {
+      status: "HalfTime",
+      statusConfidence: "high"
+    };
   }
 
   if (scheduledStates.includes(raw)) {
-    return { status: "Scheduled", statusConfidence: "high" };
+    return {
+      status: "Scheduled",
+      statusConfidence: "high"
+    };
   }
 
   if (cancelledStates.includes(raw)) {
-    return { status: "StatusUnknown", statusConfidence: "low" };
+    return {
+      status: "StatusUnknown",
+      statusConfidence: "low"
+    };
   }
 
   if (liveStates.includes(raw)) {
     const elapsed = kickoffUnix ? unixNow() - kickoffUnix : 0;
 
     if (elapsed > MAX_LIVE_SECONDS && (minute === null || minute === undefined)) {
-      return { status: "PossiblyFinished", statusConfidence: "low" };
+      return {
+        status: "PossiblyFinished",
+        statusConfidence: "low"
+      };
     }
 
     if (typeof minute === "number" && minute >= 0 && minute <= 130) {
-      return { status: "Live", statusConfidence: "high" };
+      return {
+        status: "Live",
+        statusConfidence: "high"
+      };
     }
 
-    return { status: "Live", statusConfidence: "medium" };
+    return {
+      status: "Live",
+      statusConfidence: "medium"
+    };
   }
 
-  return { status: "StatusUnknown", statusConfidence: "low" };
+  return {
+    status: "StatusUnknown",
+    statusConfidence: "low"
+  };
 }
 
 function calculateDataConfidence(matches) {
@@ -178,6 +205,7 @@ function calculateDataConfidence(matches) {
 
   if (ratio >= 0.8) return "high";
   if (ratio >= 0.5) return "medium";
+
   return "low";
 }
 
@@ -186,7 +214,9 @@ function sortMatches(matches) {
     const aTime = Number(a.kickoffUnix || 0);
     const bTime = Number(b.kickoffUnix || 0);
 
-    if (aTime !== bTime) return aTime - bTime;
+    if (aTime !== bTime) {
+      return aTime - bTime;
+    }
 
     return String(a.home || "").localeCompare(String(b.home || ""));
   });
@@ -194,13 +224,6 @@ function sortMatches(matches) {
 
 /**
  * SPORTRADAR
- * ==========
- * Por defecto consulta el schedule del día actual.
- *
- * Nota:
- * Dependiendo de tu plan de Sportradar, puede que tengas endpoints diferentes
- * para schedules de torneo/temporada completa. Este backend queda preparado para
- * recibir y normalizar "sport_events".
  */
 async function fetchFromSportradar() {
   if (!SPORTRADAR_API_KEY) {
@@ -291,7 +314,13 @@ async function fetchFromSportradar() {
 /**
  * SPORTMONKS
  * ==========
- * Alternativa. Consulta fixtures de hoy con state, scores, events y participants.
+ * Esta versión usa:
+ * GET /fixtures/date/YYYY-MM-DD
+ *
+ * En vez de:
+ * GET /fixtures?filters=fixtureDate:YYYY-MM-DD
+ *
+ * Esto corrige el error 400 que te estaba saliendo.
  */
 async function fetchFromSportMonks() {
   if (!SPORTMONKS_API_KEY) {
@@ -300,11 +329,10 @@ async function fetchFromSportMonks() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const response = await axios.get(`${SPORTMONKS_BASE_URL}/fixtures`, {
+  const response = await axios.get(`${SPORTMONKS_BASE_URL}/fixtures/date/${today}`, {
     params: {
       api_token: SPORTMONKS_API_KEY,
       include: "state;scores;events;participants;league;round",
-      filters: `fixtureDate:${today}`,
       per_page: 50
     },
     timeout: 10000
@@ -448,12 +476,17 @@ app.get("/worldcup/live", async (req, res) => {
   } catch (error) {
     console.error("[/worldcup/live] Error:", error.message);
 
+    const apiErrorData = error.response?.data || null;
+    const apiStatus = error.response?.status || null;
+
     return res.status(200).json({
       ...cache,
       lastUpdated: cache.lastUpdated || now,
       dataConfidence: "low",
       error: "No se pudieron cargar los datos en vivo.",
-      detail: error.message
+      detail: error.message,
+      apiStatus,
+      apiErrorData
     });
   }
 });
@@ -462,3 +495,4 @@ app.listen(PORT, () => {
   console.log(`Backend Mundial 2026 corriendo en puerto ${PORT}`);
   console.log(`Proveedor seleccionado: ${PROVIDER}`);
 });
+```
