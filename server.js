@@ -37,11 +37,11 @@ if (value > 1000000000 && value < 9999999999) {
 return value;
 }
 
-```
+
 if (value > 9999999999) {
   return Math.floor(value / 1000);
 }
-```
+
 
 }
 
@@ -176,13 +176,13 @@ return matches.sort(function (a, b) {
 const aTime = Number(a.kickoffUnix || 0);
 const bTime = Number(b.kickoffUnix || 0);
 
-```
+
 if (aTime !== bTime) {
   return aTime - bTime;
 }
 
 return String(a.home || "").localeCompare(String(b.home || ""));
-```
+
 
 });
 }
@@ -249,7 +249,7 @@ scoreItem.score && scoreItem.score.participant
 : ""
 ).toLowerCase();
 
-```
+
 const goals =
   scoreItem.score && typeof scoreItem.score.goals === "number"
     ? scoreItem.score.goals
@@ -262,7 +262,7 @@ if (participant === "home") {
 if (participant === "away") {
   result.awayScore = goals;
 }
-```
+
 
 });
 
@@ -377,7 +377,7 @@ return res.json(cache);
 try {
 const result = await fetchFromSportMonks();
 
-```
+
 const matches = result.matches || [];
 const dataConfidence = calculateDataConfidence(matches);
 
@@ -389,12 +389,12 @@ cache = {
 };
 
 return res.json(cache);
-```
+
 
 } catch (error) {
 console.error("Error en /worldcup/live:", error.message);
 
-```
+
 const apiStatus = error.response ? error.response.status : null;
 const apiErrorData = error.response ? error.response.data : null;
 
@@ -408,7 +408,7 @@ return res.status(200).json({
   apiStatus: apiStatus,
   apiErrorData: apiErrorData
 });
-```
+
 
 }
 });
