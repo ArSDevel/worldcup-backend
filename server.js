@@ -77,14 +77,74 @@ const date = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
 return Math.floor(date.getTime() / 1000);
 }
 
+function getPossibleTimeValue(game) {
+const possibleValues = [
+game.time_elapsed,
+game.minute,
+game.elapsed,
+game.match_minute,
+game.current_minute,
+game.currentMinute,
+game.matchMinute,
+game.status_time,
+game.statusTime
+];
+
+for (let i = 0; i < possibleValues.length; i++) {
+const value = possibleValues[i];
+
+
+if (value !== undefined && value !== null && String(value).trim() !== "") {
+  return value;
+}
+
+
+}
+
+return "";
+}
+
+function getMinute(game) {
+const possibleValues = [
+game.time_elapsed,
+game.minute,
+game.elapsed,
+game.match_minute,
+game.current_minute,
+game.currentMinute,
+game.matchMinute,
+game.status_time,
+game.statusTime
+];
+
+for (let i = 0; i < possibleValues.length; i++) {
+const value = possibleValues[i];
+const minute = Number(value);
+
+
+if (!Number.isNaN(minute) && minute >= 0 && minute <= 130) {
+  return minute;
+}
+
+
+}
+
+return null;
+}
+
 function normalizeStatus(game) {
 const rawFinished = String(game.finished || "").toLowerCase().trim();
-const rawTime = String(game.time_elapsed || "").toLowerCase().trim();
+const rawStatus = String(game.status || game.match_status || game.state || "").toLowerCase().trim();
+const rawTime = String(getPossibleTimeValue(game)).toLowerCase().trim();
 
 if (
 rawFinished === "true" ||
 rawFinished === "1" ||
 rawFinished === "yes" ||
+rawStatus === "finished" ||
+rawStatus === "ended" ||
+rawStatus === "ft" ||
+rawStatus === "fulltime" ||
 rawTime === "finished" ||
 rawTime === "ft" ||
 rawTime === "fulltime" ||
@@ -97,6 +157,50 @@ statusConfidence: "high"
 }
 
 if (
+rawStatus === "halftime" ||
+rawStatus === "half_time" ||
+rawStatus === "ht" ||
+rawTime === "halftime" ||
+rawTime === "half_time" ||
+rawTime === "ht"
+) {
+return {
+status: "HalfTime",
+statusConfidence: "high"
+};
+}
+
+const minute = getMinute(game);
+
+if (minute !== null) {
+return {
+status: "Live",
+statusConfidence: "high"
+};
+}
+
+if (
+rawStatus.includes("live") ||
+rawStatus.includes("progress") ||
+rawStatus.includes("1h") ||
+rawStatus.includes("2h") ||
+rawTime.includes("live") ||
+rawTime.includes("progress") ||
+rawTime.includes("1h") ||
+rawTime.includes("2h")
+) {
+return {
+status: "Live",
+statusConfidence: "medium"
+};
+}
+
+if (
+rawStatus === "notstarted" ||
+rawStatus === "not_started" ||
+rawStatus === "scheduled" ||
+rawStatus === "ns" ||
+rawStatus === "upcoming" ||
 rawTime === "notstarted" ||
 rawTime === "not_started" ||
 rawTime === "scheduled" ||
@@ -110,53 +214,10 @@ statusConfidence: "high"
 };
 }
 
-if (
-rawTime === "halftime" ||
-rawTime === "half_time" ||
-rawTime === "ht"
-) {
-return {
-status: "HalfTime",
-statusConfidence: "high"
-};
-}
-
-const elapsed = Number(rawTime);
-
-if (!Number.isNaN(elapsed) && elapsed >= 0 && elapsed <= 130) {
-return {
-status: "Live",
-statusConfidence: "high"
-};
-}
-
-if (
-rawTime.includes("live") ||
-rawTime.includes("progress") ||
-rawTime.includes("1h") ||
-rawTime.includes("2h")
-) {
-return {
-status: "Live",
-statusConfidence: "medium"
-};
-}
-
 return {
 status: "StatusUnknown",
 statusConfidence: "low"
 };
-}
-
-function getMinute(game) {
-const rawTime = String(game.time_elapsed || "").toLowerCase().trim();
-const minute = Number(rawTime);
-
-if (!Number.isNaN(minute) && minute >= 0 && minute <= 130) {
-return minute;
-}
-
-return null;
 }
 
 function normalizeStage(type) {
@@ -189,36 +250,51 @@ return fallback || "TBD";
 return text;
 }
 
-function normalizeGame(game) {
-const statusInfo = normalizeStatus(game);
-
-const kickoffUnix =
+function getKickoffUnix(game) {
+return (
 parseLocalDateToUnix(game.local_date) ||
 parseLocalDateToUnix(game.date) ||
-parseLocalDateToUnix(game.match_date);
+parseLocalDateToUnix(game.match_date) ||
+parseLocalDateToUnix(game.kickoff) ||
+parseLocalDateToUnix(game.start_time) ||
+0
+);
+}
+
+function normalizeGame(game) {
+const statusInfo = normalizeStatus(game);
+const kickoffUnix = getKickoffUnix(game);
 
 const homeName = normalizeTeamName(
-game.home_team_name_en || game.home_team_name || game.home_name,
+game.home_team_name_en ||
+game.home_team_name ||
+game.home_name ||
+game.home_team ||
+game.home,
 game.home_team_label || "TBD"
 );
 
 const awayName = normalizeTeamName(
-game.away_team_name_en || game.away_team_name || game.away_name,
+game.away_team_name_en ||
+game.away_team_name ||
+game.away_name ||
+game.away_team ||
+game.away,
 game.away_team_label || "TBD"
 );
 
 return {
-id: String(game.id || game._id || "match-" + kickoffUnix),
+id: String(game.id || game._id || "match-" + kickoffUnix + "-" + homeName + "-" + awayName),
 home: homeName,
 away: awayName,
-homeScore: toNumber(game.home_score, 0),
-awayScore: toNumber(game.away_score, 0),
+homeScore: toNumber(game.home_score || game.homeScore, 0),
+awayScore: toNumber(game.away_score || game.awayScore, 0),
 status: statusInfo.status,
 statusConfidence: statusInfo.statusConfidence,
 minute: getMinute(game),
 kickoffUnix: kickoffUnix,
-group: String(game.group || "N/A"),
-stage: normalizeStage(game.type),
+group: String(game.group || game.group_name || "N/A"),
+stage: normalizeStage(game.type || game.stage),
 events: []
 };
 }
@@ -269,6 +345,10 @@ if (data && data.games && Array.isArray(data.games.games)) {
 return data.games.games;
 }
 
+if (data && data.data && Array.isArray(data.data.games)) {
+return data.data.games;
+}
+
 return [];
 }
 
@@ -278,7 +358,8 @@ const url = FREE_WORLD_CUP_BASE_URL + "/get/games";
 const response = await axios.get(url, {
 timeout: 20000,
 headers: {
-"Accept": "application/json"
+Accept: "application/json",
+"User-Agent": "Mozilla/5.0 RobloxWorldCupBackend"
 }
 });
 
@@ -324,7 +405,8 @@ const url = FREE_WORLD_CUP_BASE_URL + "/get/games";
 const response = await axios.get(url, {
   timeout: 20000,
   headers: {
-    "Accept": "application/json"
+    Accept: "application/json",
+    "User-Agent": "Mozilla/5.0 RobloxWorldCupBackend"
   }
 });
 
@@ -335,7 +417,10 @@ res.json({
   url: url,
   rawType: Array.isArray(response.data) ? "array" : typeof response.data,
   gamesCount: games.length,
-  sampleGames: games.slice(0, 3)
+  sampleGames: games.slice(0, 3),
+  normalizedSample: games.slice(0, 3).map(function (game) {
+    return normalizeGame(game);
+  })
 });
 
 
@@ -384,7 +469,6 @@ res.json({
   apiStatus: error.response ? error.response.status : null,
   apiErrorData: error.response ? error.response.data : null
 });
-
 
 }
 });
