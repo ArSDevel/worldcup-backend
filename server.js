@@ -203,7 +203,9 @@ return null;
 return (
 participants.find(function (participant) {
 return participant.meta && participant.meta.location === "home";
-}) || participants[0] || null
+}) ||
+participants[0] ||
+null
 );
 }
 
