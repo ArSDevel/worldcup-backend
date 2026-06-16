@@ -139,7 +139,7 @@ scores.forEach(function (scoreItem) {
 const participant = String(scoreItem.score && scoreItem.score.participant ? scoreItem.score.participant : "").toLowerCase();
 const goals = scoreItem.score && typeof scoreItem.score.goals === "number" ? scoreItem.score.goals : 0;
 
-```
+
 if (participant === "home") {
   result.homeScore = goals;
 }
@@ -147,7 +147,7 @@ if (participant === "home") {
 if (participant === "away") {
   result.awayScore = goals;
 }
-```
+
 
 });
 
@@ -203,9 +203,9 @@ if (a.kickoffUnix !== b.kickoffUnix) {
 return a.kickoffUnix - b.kickoffUnix;
 }
 
-```
+
 return a.id.localeCompare(b.id);
-```
+
 
 });
 }
@@ -282,7 +282,7 @@ per_page: 100
 timeout: 15000
 });
 
-```
+
 const fixtures = response.data && Array.isArray(response.data.data) ? response.data.data : [];
 
 return fixtures.map(function (fixture) {
@@ -291,7 +291,7 @@ return fixtures.map(function (fixture) {
   match.statusConfidence = "high";
   return match;
 });
-```
+
 
 } catch (error) {
 console.warn("No se pudieron cargar livescores:", error.message);
@@ -344,7 +344,7 @@ try {
 const fixtures = await fetchWorldCupFixtures();
 const liveFixtures = await fetchLiveFixtures();
 
-```
+
 res.json({
   ok: true,
   fixturesCount: fixtures.length,
@@ -352,7 +352,7 @@ res.json({
   sampleFixtures: fixtures.slice(0, 5),
   sampleLiveFixtures: liveFixtures.slice(0, 5)
 });
-```
+
 
 } catch (error) {
 res.json({
@@ -375,7 +375,7 @@ try {
 const fixtures = await fetchWorldCupFixtures();
 const liveFixtures = await fetchLiveFixtures();
 
-```
+
 const matches = mergeMatches(fixtures, liveFixtures);
 
 cache = {
@@ -386,12 +386,12 @@ cache = {
 };
 
 res.json(cache);
-```
+
 
 } catch (error) {
 console.error("Error en /worldcup/live:", error.message);
 
-```
+
 res.json({
   lastUpdated: cache.lastUpdated || currentTime,
   source: "SportMonks",
@@ -402,7 +402,7 @@ res.json({
   apiStatus: error.response ? error.response.status : null,
   apiErrorData: error.response ? error.response.data : null
 });
-```
+
 
 }
 });
