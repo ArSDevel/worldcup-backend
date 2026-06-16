@@ -15,6 +15,14 @@ process.env.SPORTMONKS_BASE_URL || "https://api.sportmonks.com/v3/football";
 
 const CACHE_SECONDS = Number(process.env.CACHE_SECONDS || 30);
 
+const WORLD_CUP_START_DATE =
+process.env.WORLD_CUP_START_DATE || "2026-06-11";
+
+const WORLD_CUP_END_DATE =
+process.env.WORLD_CUP_END_DATE || "2026-07-19";
+
+const MAX_PAGES = Number(process.env.MAX_PAGES || 5);
+
 let cache = {
 lastUpdated: 0,
 source: "NONE",
@@ -37,11 +45,11 @@ if (value > 1000000000 && value < 9999999999) {
 return value;
 }
 
-
+```
 if (value > 9999999999) {
   return Math.floor(value / 1000);
 }
-
+```
 
 }
 
@@ -54,8 +62,31 @@ return 0;
 return Math.floor(parsed / 1000);
 }
 
-function normalizeStatus(rawStatus) {
+function normalizeStatus(rawStatus, kickoffUnix, minute, events) {
 const raw = String(rawStatus || "").toLowerCase().trim();
+
+const safeEvents = Array.isArray(events) ? events : [];
+
+const hasFullTimeEvent = safeEvents.some(function (event) {
+const type = String(event.type || "").toLowerCase();
+
+```
+return (
+  type.includes("full_time") ||
+  type.includes("match_ended") ||
+  type.includes("ended") ||
+  type === "ft"
+);
+```
+
+});
+
+if (hasFullTimeEvent) {
+return {
+status: "Finished",
+statusConfidence: "high"
+};
+}
 
 const scheduledStates = [
 "not_started",
@@ -143,6 +174,35 @@ statusConfidence: "low"
 };
 }
 
+if (kickoffUnix > 0) {
+const now = unixNow();
+const elapsed = now - kickoffUnix;
+
+```
+if (elapsed > 150 * 60 && !minute) {
+  return {
+    status: "PossiblyFinished",
+    statusConfidence: "low"
+  };
+}
+
+if (elapsed < -15 * 60) {
+  return {
+    status: "Scheduled",
+    statusConfidence: "medium"
+  };
+}
+
+if (elapsed >= -15 * 60 && elapsed <= 150 * 60) {
+  return {
+    status: "Live",
+    statusConfidence: "low"
+  };
+}
+```
+
+}
+
 return {
 status: "StatusUnknown",
 statusConfidence: "low"
@@ -176,13 +236,13 @@ return matches.sort(function (a, b) {
 const aTime = Number(a.kickoffUnix || 0);
 const bTime = Number(b.kickoffUnix || 0);
 
-
+```
 if (aTime !== bTime) {
   return aTime - bTime;
 }
 
 return String(a.home || "").localeCompare(String(b.home || ""));
-
+```
 
 });
 }
@@ -249,7 +309,7 @@ scoreItem.score && scoreItem.score.participant
 : ""
 ).toLowerCase();
 
-
+```
 const goals =
   scoreItem.score && typeof scoreItem.score.goals === "number"
     ? scoreItem.score.goals
@@ -262,14 +322,60 @@ if (participant === "home") {
 if (participant === "away") {
   result.awayScore = goals;
 }
-
+```
 
 });
 
 return result;
 }
 
-function normalizeFixture(fixture) {
+function normalizeEvent(event) {
+return {
+type: event.type || event.type_id || "event",
+team: event.participant_name || "",
+player: event.player_name || "",
+minute: event.minute || null,
+period: event.period || null
+};
+}
+
+function getLeagueName(fixture) {
+if (fixture.league && fixture.league.name) {
+return fixture.league.name;
+}
+
+return "";
+}
+
+function getRoundName(fixture) {
+if (fixture.round && fixture.round.name) {
+return fixture.round.name;
+}
+
+return "";
+}
+
+function looksLikeWorldCupFixture(fixture) {
+const leagueName = getLeagueName(fixture).toLowerCase();
+const roundName = getRoundName(fixture).toLowerCase();
+const nameBlob = leagueName + " " + roundName;
+
+if (nameBlob.includes("world cup")) {
+return true;
+}
+
+if (nameBlob.includes("fifa")) {
+return true;
+}
+
+if (nameBlob.includes("mundial")) {
+return true;
+}
+
+return false;
+}
+
+function normalizeFixture(fixture, forceLive) {
 const participants = fixture.participants || [];
 
 const home = getHomeParticipant(participants);
@@ -283,20 +389,24 @@ const rawStatus =
 (fixture.state && fixture.state.short_name) ||
 "StatusUnknown";
 
-const normalized = normalizeStatus(rawStatus);
-
 const kickoffUnix = toUnix(fixture.starting_at);
 
 const events = Array.isArray(fixture.events)
 ? fixture.events.map(function (event) {
-return {
-type: event.type || event.type_id || "event",
-team: event.participant_name || "",
-player: event.player_name || "",
-minute: event.minute || null
-};
+return normalizeEvent(event);
 })
 : [];
+
+const minute = typeof fixture.minute === "number" ? fixture.minute : null;
+
+let normalized = normalizeStatus(rawStatus, kickoffUnix, minute, events);
+
+if (forceLive) {
+normalized = {
+status: "Live",
+statusConfidence: "high"
+};
+}
 
 return {
 id: String(fixture.id || "fixture-" + kickoffUnix),
@@ -306,12 +416,113 @@ homeScore: scores.homeScore,
 awayScore: scores.awayScore,
 status: normalized.status,
 statusConfidence: normalized.statusConfidence,
-minute: typeof fixture.minute === "number" ? fixture.minute : null,
+minute: minute,
 kickoffUnix: kickoffUnix,
-group: fixture.round && fixture.round.name ? fixture.round.name : "N/A",
-stage: fixture.league && fixture.league.name ? fixture.league.name : "N/A",
+group: getRoundName(fixture) || "N/A",
+stage: getLeagueName(fixture) || "World Cup",
 events: events
 };
+}
+
+async function getSportMonksPage(url, params, page) {
+const response = await axios.get(url, {
+params: Object.assign({}, params, {
+page: page
+}),
+timeout: 20000
+});
+
+return response.data || {};
+}
+
+async function fetchFixturesBetweenDates() {
+const url =
+SPORTMONKS_BASE_URL +
+"/fixtures/between/" +
+WORLD_CUP_START_DATE +
+"/" +
+WORLD_CUP_END_DATE;
+
+const params = {
+api_token: SPORTMONKS_API_KEY,
+include: "state;scores;events;participants;league;round",
+per_page: 100
+};
+
+let fixtures = [];
+
+for (let page = 1; page <= MAX_PAGES; page++) {
+const data = await getSportMonksPage(url, params, page);
+
+```
+const pageData = Array.isArray(data.data) ? data.data : [];
+
+fixtures = fixtures.concat(pageData);
+
+const pagination = data.pagination || data.meta || {};
+const hasMore =
+  pagination.has_more === true ||
+  pagination.has_more_pages === true ||
+  pagination.current_page < pagination.last_page;
+
+if (!hasMore || pageData.length === 0) {
+  break;
+}
+```
+
+}
+
+return fixtures;
+}
+
+async function fetchLiveFixtures() {
+const url = SPORTMONKS_BASE_URL + "/livescores/inplay";
+
+try {
+const response = await axios.get(url, {
+params: {
+api_token: SPORTMONKS_API_KEY,
+include: "state;scores;events;participants;league;round",
+per_page: 100
+},
+timeout: 15000
+});
+
+```
+const fixtures =
+  response.data && Array.isArray(response.data.data)
+    ? response.data.data
+    : [];
+
+return fixtures;
+```
+
+} catch (error) {
+console.warn("No se pudieron cargar livescores:", error.message);
+return [];
+}
+}
+
+function mergeFixturesAndLives(fixtures, liveFixtures) {
+const map = {};
+
+fixtures.forEach(function (fixture) {
+map[String(fixture.id)] = {
+fixture: fixture,
+forceLive: false
+};
+});
+
+liveFixtures.forEach(function (fixture) {
+map[String(fixture.id)] = {
+fixture: fixture,
+forceLive: true
+};
+});
+
+return Object.keys(map).map(function (id) {
+return normalizeFixture(map[id].fixture, map[id].forceLive);
+});
 }
 
 async function fetchFromSportMonks() {
@@ -319,27 +530,34 @@ if (!SPORTMONKS_API_KEY) {
 throw new Error("Falta SPORTMONKS_API_KEY en Render Environment Variables");
 }
 
-const today = new Date().toISOString().slice(0, 10);
+const fixtures = await fetchFixturesBetweenDates();
+const liveFixtures = await fetchLiveFixtures();
 
-const url = SPORTMONKS_BASE_URL + "/fixtures/date/" + today;
+let matches = mergeFixturesAndLives(fixtures, liveFixtures);
 
-const response = await axios.get(url, {
-params: {
-api_token: SPORTMONKS_API_KEY,
-include: "state;scores;events;participants;league;round",
-per_page: 50
-},
-timeout: 15000
+const worldCupOnly = String(process.env.WORLD_CUP_ONLY || "true").toLowerCase();
+
+if (worldCupOnly === "true") {
+const filtered = matches.filter(function (match) {
+const blob =
+String(match.stage || "").toLowerCase() +
+" " +
+String(match.group || "").toLowerCase();
+
+```
+  return (
+    blob.includes("world cup") ||
+    blob.includes("fifa") ||
+    blob.includes("mundial")
+  );
 });
 
-const fixtures =
-response.data && Array.isArray(response.data.data)
-? response.data.data
-: [];
+if (filtered.length > 0) {
+  matches = filtered;
+}
+```
 
-const matches = fixtures.map(function (fixture) {
-return normalizeFixture(fixture);
-});
+}
 
 return {
 source: "SportMonks",
@@ -351,7 +569,7 @@ app.get("/", function (req, res) {
 res.json({
 ok: true,
 message: "Mundial 2026 Backend para Roblox",
-endpoints: ["/health", "/worldcup/live"]
+endpoints: ["/health", "/worldcup/live", "/debug/raw"]
 });
 });
 
@@ -359,12 +577,44 @@ app.get("/health", function (req, res) {
 res.json({
 ok: true,
 source: cache.source,
+config: {
+startDate: WORLD_CUP_START_DATE,
+endDate: WORLD_CUP_END_DATE,
+cacheSeconds: CACHE_SECONDS,
+maxPages: MAX_PAGES,
+worldCupOnly: process.env.WORLD_CUP_ONLY || "true"
+},
 cache: {
 lastUpdated: cache.lastUpdated,
 matchCount: cache.matches.length,
 dataConfidence: cache.dataConfidence
 }
 });
+});
+
+app.get("/debug/raw", async function (req, res) {
+try {
+const fixtures = await fetchFixturesBetweenDates();
+const liveFixtures = await fetchLiveFixtures();
+
+```
+res.json({
+  ok: true,
+  fixturesCount: fixtures.length,
+  liveFixturesCount: liveFixtures.length,
+  sampleFixtures: fixtures.slice(0, 5),
+  sampleLiveFixtures: liveFixtures.slice(0, 5)
+});
+```
+
+} catch (error) {
+res.status(200).json({
+ok: false,
+detail: error.message,
+apiStatus: error.response ? error.response.status : null,
+apiErrorData: error.response ? error.response.data : null
+});
+}
 });
 
 app.get("/worldcup/live", async function (req, res) {
@@ -377,7 +627,7 @@ return res.json(cache);
 try {
 const result = await fetchFromSportMonks();
 
-
+```
 const matches = result.matches || [];
 const dataConfidence = calculateDataConfidence(matches);
 
@@ -389,12 +639,12 @@ cache = {
 };
 
 return res.json(cache);
-
+```
 
 } catch (error) {
 console.error("Error en /worldcup/live:", error.message);
 
-
+```
 const apiStatus = error.response ? error.response.status : null;
 const apiErrorData = error.response ? error.response.data : null;
 
@@ -408,7 +658,7 @@ return res.status(200).json({
   apiStatus: apiStatus,
   apiErrorData: apiErrorData
 });
-
+```
 
 }
 });
@@ -416,4 +666,5 @@ return res.status(200).json({
 app.listen(PORT, function () {
 console.log("Backend Mundial 2026 corriendo en puerto " + PORT);
 console.log("Usando proveedor: SportMonks");
+console.log("Fechas: " + WORLD_CUP_START_DATE + " a " + WORLD_CUP_END_DATE);
 });
